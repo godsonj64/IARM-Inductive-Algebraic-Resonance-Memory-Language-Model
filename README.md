@@ -7,6 +7,14 @@ IARM does not use causal self-attention: there is no key projection, no query-ke
 ## Files
 
 - `iarm_lm_model_only.py` - model-only IARM-LM implementation with internal-structure and activation-trace printers.
-- `iarm_lm_clutrr_eval_single_cell.py` - single-cell CLUTRR evaluation harness for IARM-LM.
 - `paper/iarm_architecture_paper.tex` - LaTeX source for the architecture paper.
-- `paper/iarm_architecture_paper.pdf` - compiled architecture paper.
+
+## Compile the paper
+
+From the repository root, run:
+
+```bash
+pdflatex -interaction=nonstopmode -halt-on-error paper/iarm_architecture_paper.tex
+```
+
+The paper intentionally describes IARM as a non-attention causal memory architecture, not as causal self-attention.
