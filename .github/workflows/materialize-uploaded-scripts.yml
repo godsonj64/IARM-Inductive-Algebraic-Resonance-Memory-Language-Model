@@ -1,0 +1,77 @@
+name: Materialize uploaded IARM scripts
+
+on:
+  push:
+    paths:
+      - ".github/workflows/materialize-uploaded-scripts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Restore raw Python scripts
+        run: |
+          python scripts/extract_uploaded_scripts.py
+
+      - name: Remove compressed bundle and workflow
+        run: |
+          rm -rf script_bundle
+          rm -f scripts/extract_uploaded_scripts.py
+          rm -f .github/workflows/materialize-uploaded-scripts.yml
+
+      - name: Rewrite README for plain source layout
+        run: |
+          cat > README.md <<'EOF'
+          # IARM: Inductive Algebraic Resonance Memory Language Model
+
+          This repository contains the Inductive Algebraic Resonance Memory Language Model (IARM-LM), a non-attention causal language architecture based on learned low-rank query operators and cumulative prefix-normalized memory scans.
+
+          IARM does not use causal self-attention: there is no key projection, no query-key score matrix, and no softmax attention matrix. Sequence mixing is performed through local causal convolution, operator-transformed query features, and causal memory accumulation.
+
+          ## Files
+
+          - `iarm_lm_model_only.py` - model-only IARM-LM implementation with internal-structure and activation-trace printers.
+          - `examples/smoke_test.py` - runnable smoke test and activation-trace example.
+          - `paper/iarm_architecture_paper.tex` - LaTeX source for the architecture paper.
+          - `scripts/iarm_lm_full10b_ultrachat200k.py` - full 10B pretraining plus UltraChat SFT script.
+          - `scripts/iarm_research_finetune_observe_colab_fixed.py` - research fine-tuning, DPO, and internal-state diagnostics script.
+          - `scripts/iarm_teacher_memory_transfer_colab_single_cell.py` - teacher-to-IARM memory transfer script.
+
+          ## Run the smoke test
+
+          ```bash
+          python examples/smoke_test.py
+          ```
+
+          ## Compile the paper
+
+          From the repository root, run:
+
+          ```bash
+          pdflatex -interaction=nonstopmode -halt-on-error paper/iarm_architecture_paper.tex
+          ```
+
+          The paper intentionally describes IARM as a non-attention causal memory architecture, not as causal self-attention.
+          EOF
+          sed -i 's/^          //' README.md
+
+      - name: Commit plain source files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Materialize uploaded IARM scripts as plain source files"
+            git push
+          fi
