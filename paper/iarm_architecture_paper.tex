@@ -1,0 +1,214 @@
+\documentclass[10pt]{article}
+
+\usepackage[margin=0.78in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=*}
+
+\title{Inductive Algebraic Resonance Memory: A Non-Attention Causal Language Architecture}
+\author{Godson Johnson}
+\date{}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\od}{\odot}
+\newcommand{\oslashop}{\oslash}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Inductive Algebraic Resonance Memory (IARM) is a causal language-model architecture that replaces pairwise self-attention with learned low-rank query operators and a prefix-normalized memory scan. The architecture preserves the residual, normalized, feed-forward structure of modern decoder language models, but its sequence mixer contains no key projection, no query-key score matrix, and no softmax attention matrix. Each layer combines depthwise causal local convolution, rotary query phases, gated low-rank query transformations, positive feature construction, cumulative feature-value memory, output gating, and a SwiGLU feed-forward block. This note gives the mathematical specification of the IARM language model and clarifies its relation to attention-based and linear-time sequence models.
+\end{abstract}
+
+\section{Motivation}
+Autoregressive language models commonly use causal self-attention, where each position forms query-key scores against all earlier positions and then mixes values through a normalized attention matrix \cite{vaswani2017attention}. This mechanism is expressive, but it explicitly constructs token-token interactions. Several alternatives have sought linear-time sequence mixing, including kernelized attention \cite{katharopoulos2020transformers}, random-feature attention \cite{choromanski2021rethinking}, recurrent state-space models \cite{gu2023mamba}, and convolutional or gated convolutional sequence models \cite{chollet2017xception,dauphin2017language}.
+
+IARM follows a different route. It does not approximate causal self-attention. Instead, it constructs a learned causal memory from positive transformed query features and values. The current token representation contributes to a cumulative memory state, and the readout is a coordinatewise normalized prefix statistic. The central architectural idea is that sequence context can be represented by an evolving algebraic memory rather than by an explicit attention matrix.
+
+\section{Model Overview}
+Let the token sequence be $x_{1:T}$ with vocabulary size $V$. The model embeds tokens into $d$ dimensions and applies dropout,
+\begin{equation}
+H^{(0)} = \operatorname{Dropout}(E[x_{1:T}]), \qquad E \in \R^{V\times d}. 
+\end{equation}
+The model consists of $L$ identical residual blocks. For layer $\ell$, the update is
+\begin{align}
+\widetilde H^{(\ell)} &= \operatorname{IARMUnit}\!\left(H^{(\ell-1)}\right), \\
+H^{(\ell)} &= \widetilde H^{(\ell)} + \operatorname{SwiGLU}\!\left(\operatorname{RMSNorm}(\widetilde H^{(\ell)})\right).
+\end{align}
+After the final block, a root-mean-square normalization \cite{zhang2019root} is applied and logits are produced with a tied language-model head \cite{inan2017tying,press2017using},
+\begin{equation}
+Z = \operatorname{RMSNorm}(H^{(L)}), \qquad \operatorname{logits}_t = E Z_t.
+\end{equation}
+The feed-forward sublayer uses a SwiGLU nonlinearity, following the gated feed-forward design used in modern language models \cite{shazeer2020glu}.
+
+\section{Inductive Algebraic Resonance Unit}
+For a layer input $X\in\R^{B\times T\times d}$, the unit first computes
+\begin{equation}
+\bar X = \operatorname{RMSNorm}(X).
+\end{equation}
+A depthwise causal convolution gives a local temporal signal
+\begin{equation}
+L = \operatorname{DepthwiseCausalConv}(\bar X),
+\end{equation}
+where the convolution is channelwise, uses kernel width $k$, and truncates the right padding so that position $t$ depends only on positions at or before $t$.
+
+The normalized states are projected into queries and values,
+\begin{equation}
+Q = W_q \bar X, \qquad V = W_v \bar X,
+\end{equation}
+then reshaped into $A$ heads of width $d_h=d/A$. Rotary positional embeddings are applied to queries only \cite{su2021roformer},
+\begin{equation}
+Q \leftarrow \operatorname{RoPE}(Q).
+\end{equation}
+There is no key tensor. Consequently, the unit has no query-key dot product and no attention matrix.
+
+\subsection{Gated Low-Rank Query Operators}
+For each head $a\in\{1,\ldots,A\}$ and operator index $o\in\{1,\ldots,O\}$, IARM learns two low-rank factors
+\begin{equation}
+U_{a,o},R_{a,o}\in\R^{d_h\times r},
+\end{equation}
+which define an implicit rank-$r$ operator $U_{a,o}R_{a,o}^{\top}$. A gate over operators is predicted from the normalized hidden state,
+\begin{equation}
+G_{b,a,t,o}=
+\frac{\exp((W_g\bar X_{b,t})_{a,o})}
+{\sum_{o'=1}^{O}\exp((W_g\bar X_{b,t})_{a,o'})}.
+\end{equation}
+The query displacement is a gated mixture of low-rank operator actions,
+\begin{equation}
+\Delta Q_{b,a,t}
+=
+\sum_{o=1}^{O}
+G_{b,a,t,o}\,U_{a,o}\left(R_{a,o}^{\top}Q_{b,a,t}\right).
+\end{equation}
+The transformed query is
+\begin{equation}
+\widehat Q_{b,a,t}=Q_{b,a,t}+\frac{\Delta Q_{b,a,t}}{\sqrt r}.
+\end{equation}
+This operator pathway is related in spirit to low-rank adaptation and low-rank parameterization \cite{hu2022lora}, but here the low-rank factors are intrinsic sequence-mixing operators rather than adapters added to an existing attention model.
+
+\subsection{Positive Features and Causal Memory Scan}
+The transformed query is mapped to a positive feature vector using the shifted ELU feature map \cite{clevert2016fast},
+\begin{equation}
+\Phi_{b,a,t}=\operatorname{ELU}(\widehat Q_{b,a,t})+1.
+\end{equation}
+The causal memory is then built through cumulative coordinatewise sums,
+\begin{align}
+N_{b,a,t} &= \sum_{s\leq t}\Phi_{b,a,s}\od V_{b,a,s}, \\
+D_{b,a,t} &= \max\left(\sum_{s\leq t}\Phi_{b,a,s},\varepsilon\right),
+\end{align}
+where the maximum is applied coordinatewise for numerical stability. The memory read is
+\begin{equation}
+M_{b,a,t}=N_{b,a,t}\oslashop D_{b,a,t}.
+\end{equation}
+This operation is causal because all sums are restricted to $s\leq t$. It is not attention: the readout is not a weighted sum over values using scores from the current position to every past position. It is a prefix-normalized feature-value statistic.
+
+\subsection{Output Gating and Residual Return}
+The multi-head memory output is reshaped to $\R^d$ and combined with the local convolution signal. A learned output gate controls the emitted sequence-mixing signal,
+\begin{align}
+\Gamma &= \sigma(W_o\bar X),\\
+Y &= W_{\mathrm{out}}\left(\Gamma\od (\operatorname{MergeHeads}(M)+L)\right).
+\end{align}
+The unit returns a residual update,
+\begin{equation}
+\operatorname{IARMUnit}(X)=X+\operatorname{Dropout}(Y).
+\end{equation}
+
+\section{Distinction from Causal Self-Attention}
+Causal self-attention computes
+\begin{equation}
+\operatorname{Attn}(Q,K,V)_t
+=
+\sum_{s\leq t}
+\operatorname{softmax}_{s}\left(\frac{Q_tK_s^{\top}}{\sqrt{d_h}}\right)V_s.
+\end{equation}
+IARM does not compute this expression or an approximation of it. Its memory read is instead
+\begin{equation}
+M_t=
+\frac{\sum_{s\leq t}\Phi_s\od V_s}
+{\max\left(\sum_{s\leq t}\Phi_s,\varepsilon\right)}.
+\end{equation}
+The distinction is structural. Attention uses current-position queries to score all past keys. IARM accumulates transformed positive query features and values into a causal memory. It therefore has no explicit token-token score matrix and no softmax over previous positions.
+
+\section{Complexity and Parameterization}
+For sequence length $T$, width $d$, number of heads $A$, operator count $O$, and rank $r$, the scan part of IARM is linear in $T$. The operator transformation contributes approximately $O(BTAOrd_h)$ operations, while the cumulative memory scan contributes $O(BTAd_h)$. Since $d=Ad_h$, the dominant sequence dependence is linear in $T$ for fixed $O$ and $r$. This contrasts with the $O(T^2)$ score matrix used in standard full causal attention.
+
+The unit also includes a depthwise convolution with cost $O(BTdk)$ and a SwiGLU block with the usual feed-forward cost determined by the hidden dimension. The architecture therefore separates short-range local filtering, algebraic operator transformation, and prefix memory accumulation.
+
+\section{Discussion}
+IARM is best understood as a non-attention causal language architecture. Its inductive bias is not pairwise retrieval but progressive memory formation: each position contributes a positive transformed query feature and a value to a cumulative memory; the read is a normalized prefix statistic. The low-rank operator bank gives the model a learned algebraic mechanism for reshaping query geometry before memory formation. The local convolution supplies immediate neighborhood structure, while the SwiGLU block supplies channelwise nonlinear transformation.
+
+This design keeps several stabilizing ingredients from modern decoder models, including residual connections, RMS normalization, rotary phases, gated feed-forward layers, dropout, and tied embeddings. Its defining difference is the absence of causal self-attention. The model's sequence mixer is a causal resonance-memory scan built from learned operator-transformed features.
+
+\begin{thebibliography}{99}
+
+\bibitem{vaswani2017attention}
+A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, L. Kaiser, and I. Polosukhin.
+Attention is all you need.
+\emph{Advances in Neural Information Processing Systems}, 2017.
+
+\bibitem{katharopoulos2020transformers}
+A. Katharopoulos, A. Vyas, N. Pappas, and F. Fleuret.
+Transformers are RNNs: Fast autoregressive transformers with linear attention.
+\emph{Proceedings of ICML}, 2020.
+
+\bibitem{choromanski2021rethinking}
+K. Choromanski, V. Likhosherstov, D. Dohan, X. Song, A. Gane, T. Sarlos, P. Hawkins, J. Davis, A. Mohiuddin, L. Kaiser, D. Belanger, L. Colwell, and A. Weller.
+Rethinking attention with performers.
+\emph{Proceedings of ICLR}, 2021.
+
+\bibitem{gu2023mamba}
+A. Gu and T. Dao.
+Mamba: Linear-time sequence modeling with selective state spaces.
+\emph{arXiv:2312.00752}, 2023.
+
+\bibitem{zhang2019root}
+B. Zhang and R. Sennrich.
+Root mean square layer normalization.
+\emph{Advances in Neural Information Processing Systems}, 2019.
+
+\bibitem{su2021roformer}
+J. Su, Y. Lu, S. Pan, B. Wen, and Y. Liu.
+RoFormer: Enhanced transformer with rotary position embedding.
+\emph{arXiv:2104.09864}, 2021.
+
+\bibitem{shazeer2020glu}
+N. Shazeer.
+GLU variants improve transformer.
+\emph{arXiv:2002.05202}, 2020.
+
+\bibitem{chollet2017xception}
+F. Chollet.
+Xception: Deep learning with depthwise separable convolutions.
+\emph{Proceedings of CVPR}, 2017.
+
+\bibitem{dauphin2017language}
+Y. N. Dauphin, A. Fan, M. Auli, and D. Grangier.
+Language modeling with gated convolutional networks.
+\emph{Proceedings of ICML}, 2017.
+
+\bibitem{clevert2016fast}
+D. A. Clevert, T. Unterthiner, and S. Hochreiter.
+Fast and accurate deep network learning by exponential linear units (ELUs).
+\emph{Proceedings of ICLR}, 2016.
+
+\bibitem{inan2017tying}
+H. Inan, K. Khosravi, and R. Socher.
+Tying word vectors and word classifiers: A loss framework for language modeling.
+\emph{Proceedings of ICLR}, 2017.
+
+\bibitem{press2017using}
+O. Press and L. Wolf.
+Using the output embedding to improve language models.
+\emph{Proceedings of EACL}, 2017.
+
+\bibitem{hu2022lora}
+E. J. Hu, Y. Shen, P. Wallis, Z. Allen-Zhu, Y. Li, S. Wang, L. Wang, and W. Chen.
+LoRA: Low-rank adaptation of large language models.
+\emph{Proceedings of ICLR}, 2022.
+
+\end{thebibliography}
+
+\end{document}
