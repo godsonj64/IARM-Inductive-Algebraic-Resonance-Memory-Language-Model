@@ -7,7 +7,14 @@ IARM does not use causal self-attention: there is no key projection, no query-ke
 ## Files
 
 - `iarm_lm_model_only.py` - model-only IARM-LM implementation with internal-structure and activation-trace printers.
+- `examples/smoke_test.py` - runnable smoke test and activation-trace example.
 - `paper/iarm_architecture_paper.tex` - LaTeX source for the architecture paper.
+
+## Run the smoke test
+
+```bash
+python examples/smoke_test.py
+```
 
 ## Compile the paper
 
