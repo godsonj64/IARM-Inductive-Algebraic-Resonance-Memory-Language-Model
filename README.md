@@ -9,6 +9,22 @@ IARM does not use causal self-attention: there is no key projection, no query-ke
 - `iarm_lm_model_only.py` - model-only IARM-LM implementation with internal-structure and activation-trace printers.
 - `examples/smoke_test.py` - runnable smoke test and activation-trace example.
 - `paper/iarm_architecture_paper.tex` - LaTeX source for the architecture paper.
+- `script_bundle/iarm_uploaded_scripts_xz_parts/` - exact compressed payload for the uploaded training scripts.
+- `scripts/extract_uploaded_scripts.py` - extractor that restores the uploaded training scripts into `scripts/`.
+
+## Restore the uploaded training scripts
+
+Run this after cloning:
+
+```bash
+python scripts/extract_uploaded_scripts.py
+```
+
+This reconstructs these files under `scripts/`:
+
+- `scripts/iarm_teacher_memory_transfer_colab_single_cell.py`
+- `scripts/iarm_research_finetune_observe_colab_fixed.py`
+- `scripts/iarm_lm_full10b_ultrachat200k.py`
 
 ## Run the smoke test
 
